@@ -7,7 +7,8 @@ namespace Wayfarer.Player
     /// <summary>
     /// Holds up to 6 spell slots (selected via Q/E/R/Z/X/C), casts the currently-selected
     /// spell on left-click while aiming. Checks and consumes Water cost via WaterResource,
-    /// enforces per-spell cooldowns.
+    /// enforces per-spell cooldowns. Pressing a slot's key again, pressing Deselect (Tab),
+    /// or entering surf state clears the current selection.
     /// </summary>
     public class PlayerSpellCaster : MonoBehaviour
     {
@@ -16,6 +17,7 @@ namespace Wayfarer.Player
         [SerializeField] private LayerMask targetMask;
 
         [SerializeField] private InputActionReference castInput;
+        [SerializeField] private InputActionReference deselectInput;
         [SerializeField] private InputActionReference[] selectInputs = new InputActionReference[6];
 
         [SerializeField] private PlayerController playerController;
@@ -28,10 +30,18 @@ namespace Wayfarer.Player
 
         public SpellData SelectedSpell => selectedSlot >= 0 && selectedSlot < spellSlots.Length ? spellSlots[selectedSlot] : null;
 
+        public int SelectedSlotIndex => selectedSlot;
+
         private void OnEnable()
         {
             castInput.action.Enable();
             castInput.action.performed += OnCastPerformed;
+
+            if (deselectInput != null)
+            {
+                deselectInput.action.Enable();
+                deselectInput.action.performed += OnDeselectPerformed;
+            }
 
             for (int i = 0; i < selectInputs.Length; i++)
             {
@@ -47,6 +57,12 @@ namespace Wayfarer.Player
             castInput.action.performed -= OnCastPerformed;
             castInput.action.Disable();
 
+            if (deselectInput != null)
+            {
+                deselectInput.action.performed -= OnDeselectPerformed;
+                deselectInput.action.Disable();
+            }
+
             foreach (var input in selectInputs)
             {
                 if (input == null) continue;
@@ -54,14 +70,33 @@ namespace Wayfarer.Player
             }
         }
 
+        // Pressing the same slot's key again deselects it (toggle); pressing a different slot's
+        // key switches to it.
         public void SelectSlot(int index)
         {
             if (index < 0 || index >= spellSlots.Length) return;
             if (spellSlots[index] == null) return;
+
+            if (selectedSlot == index)
+            {
+                Deselect();
+                return;
+            }
+
             selectedSlot = index;
         }
 
-private Vector3 ComputeAimPoint()
+        public void Deselect()
+        {
+            selectedSlot = -1;
+        }
+
+        private void OnDeselectPerformed(InputAction.CallbackContext context)
+        {
+            Deselect();
+        }
+
+        private Vector3 ComputeAimPoint()
         {
             var cam = Camera.main;
             if (cam == null)
@@ -77,7 +112,6 @@ private Vector3 ComputeAimPoint()
 
             return ray.origin + ray.direction * aimRayDistance;
         }
-
 
         private void OnCastPerformed(InputAction.CallbackContext context)
         {

@@ -188,6 +188,24 @@ public partial class @PlayerControls: IInputActionCollection2, IDisposable
                     ""processors"": """",
                     ""interactions"": """",
                     ""initialStateCheck"": false
+                },
+                {
+                    ""name"": ""Surf"",
+                    ""type"": ""Button"",
+                    ""id"": ""b2c3d4e5-9999-4a2b-9c3d-e4f5a6b7c900"",
+                    ""expectedControlType"": """",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": false
+                },
+                {
+                    ""name"": ""Deselect"",
+                    ""type"": ""Button"",
+                    ""id"": ""d5e66551-cc7a-40bb-a81e-7495fcc97cf4"",
+                    ""expectedControlType"": """",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": false
                 }
             ],
             ""bindings"": [
@@ -298,6 +316,28 @@ public partial class @PlayerControls: IInputActionCollection2, IDisposable
                     ""processors"": """",
                     ""groups"": """",
                     ""action"": ""Aim"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""b2c3d4e5-8888-4a2b-9c3d-e4f5a6b7c901"",
+                    ""path"": ""<Keyboard>/leftShift"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Surf"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""208bd3c2-35c7-49ba-8bc4-ac7caa220ed4"",
+                    ""path"": ""<Keyboard>/tab"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Deselect"",
                     ""isComposite"": false,
                     ""isPartOfComposite"": false
                 }
@@ -463,6 +503,8 @@ public partial class @PlayerControls: IInputActionCollection2, IDisposable
         m_Gameplay_Move = m_Gameplay.FindAction("Move", throwIfNotFound: true);
         m_Gameplay_Jump = m_Gameplay.FindAction("Jump", throwIfNotFound: true);
         m_Gameplay_Aim = m_Gameplay.FindAction("Aim", throwIfNotFound: true);
+        m_Gameplay_Surf = m_Gameplay.FindAction("Surf", throwIfNotFound: true);
+        m_Gameplay_Deselect = m_Gameplay.FindAction("Deselect", throwIfNotFound: true);
         // Spells
         m_Spells = asset.FindActionMap("Spells", throwIfNotFound: true);
         m_Spells_Cast = m_Spells.FindAction("Cast", throwIfNotFound: true);
@@ -664,6 +706,8 @@ public partial class @PlayerControls: IInputActionCollection2, IDisposable
     private readonly InputAction m_Gameplay_Move;
     private readonly InputAction m_Gameplay_Jump;
     private readonly InputAction m_Gameplay_Aim;
+    private readonly InputAction m_Gameplay_Surf;
+    private readonly InputAction m_Gameplay_Deselect;
     /// <summary>
     /// Provides access to input actions defined in input action map "Gameplay".
     /// </summary>
@@ -687,6 +731,14 @@ public partial class @PlayerControls: IInputActionCollection2, IDisposable
         /// Provides access to the underlying input action "Gameplay/Aim".
         /// </summary>
         public InputAction @Aim => m_Wrapper.m_Gameplay_Aim;
+        /// <summary>
+        /// Provides access to the underlying input action "Gameplay/Surf".
+        /// </summary>
+        public InputAction @Surf => m_Wrapper.m_Gameplay_Surf;
+        /// <summary>
+        /// Provides access to the underlying input action "Gameplay/Deselect".
+        /// </summary>
+        public InputAction @Deselect => m_Wrapper.m_Gameplay_Deselect;
         /// <summary>
         /// Provides access to the underlying input action map instance.
         /// </summary>
@@ -722,6 +774,12 @@ public partial class @PlayerControls: IInputActionCollection2, IDisposable
             @Aim.started += instance.OnAim;
             @Aim.performed += instance.OnAim;
             @Aim.canceled += instance.OnAim;
+            @Surf.started += instance.OnSurf;
+            @Surf.performed += instance.OnSurf;
+            @Surf.canceled += instance.OnSurf;
+            @Deselect.started += instance.OnDeselect;
+            @Deselect.performed += instance.OnDeselect;
+            @Deselect.canceled += instance.OnDeselect;
         }
 
         /// <summary>
@@ -742,6 +800,12 @@ public partial class @PlayerControls: IInputActionCollection2, IDisposable
             @Aim.started -= instance.OnAim;
             @Aim.performed -= instance.OnAim;
             @Aim.canceled -= instance.OnAim;
+            @Surf.started -= instance.OnSurf;
+            @Surf.performed -= instance.OnSurf;
+            @Surf.canceled -= instance.OnSurf;
+            @Deselect.started -= instance.OnDeselect;
+            @Deselect.performed -= instance.OnDeselect;
+            @Deselect.canceled -= instance.OnDeselect;
         }
 
         /// <summary>
@@ -987,6 +1051,20 @@ public partial class @PlayerControls: IInputActionCollection2, IDisposable
         /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
         /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
         void OnAim(InputAction.CallbackContext context);
+        /// <summary>
+        /// Method invoked when associated input action "Surf" is either <see cref="UnityEngine.InputSystem.InputAction.started" />, <see cref="UnityEngine.InputSystem.InputAction.performed" /> or <see cref="UnityEngine.InputSystem.InputAction.canceled" />.
+        /// </summary>
+        /// <seealso cref="UnityEngine.InputSystem.InputAction.started" />
+        /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
+        /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
+        void OnSurf(InputAction.CallbackContext context);
+        /// <summary>
+        /// Method invoked when associated input action "Deselect" is either <see cref="UnityEngine.InputSystem.InputAction.started" />, <see cref="UnityEngine.InputSystem.InputAction.performed" /> or <see cref="UnityEngine.InputSystem.InputAction.canceled" />.
+        /// </summary>
+        /// <seealso cref="UnityEngine.InputSystem.InputAction.started" />
+        /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
+        /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
+        void OnDeselect(InputAction.CallbackContext context);
     }
     /// <summary>
     /// Interface to implement callback methods for all input action callbacks associated with input actions defined by "Spells" which allows adding and removing callbacks.
