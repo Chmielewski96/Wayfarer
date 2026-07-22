@@ -6,9 +6,11 @@ namespace Wayfarer.Movement
 {
     /// <summary>
     /// Ice Surfing movement ability for the Sea mage kit: persistent velocity + acceleration
-    /// model, carving (turn-rate shrinks with speed, over-turning bleeds speed), ground-plane
-    /// projected velocity so slopes are followed downhill and launch you at convex transitions
-    /// (ramp crests/ends), and a Water drain/sec cost shared with the rest of the Sea kit.
+    /// model, carving (turn-rate shrinks with speed, over-turning bleeds speed, and sharpens
+    /// the longer a turn is held), ground-plane projected velocity so slopes are followed
+    /// downhill and launch you at convex transitions (ramp crests/ends), and a Water drain/sec
+    /// cost shared with the rest of the Sea kit. Can be toggled on or off at any time, including
+    /// mid-air.
     ///
     /// Coexists with PlayerController rather than replacing it: PlayerController owns all
     /// normal movement/rotation/jump, and hands off control here only while surfing is active
@@ -25,6 +27,7 @@ namespace Wayfarer.Movement
         [SerializeField] private Animator animator;
         [SerializeField] private GameObject iceBoardVisual;
         [SerializeField] private ParticleSystem snowPuffVfx;
+        [SerializeField] private Transform modelTransform;
 
         [Header("Input")]
         [SerializeField] private InputActionReference moveInput;
@@ -33,8 +36,8 @@ namespace Wayfarer.Movement
 
         [Header("Surf Speed")]
         [SerializeField] private float surfBaseSpeed = 9f;
-        [SerializeField] private float surfMaxSpeed = 38f;
-        [SerializeField] private float surfAccel = 18f;
+        [SerializeField] private float surfMaxSpeed = 22f;
+        [SerializeField] private float surfAccel = 9f;
         [SerializeField] private float passiveDecayPerSecond = 1f;
 
         [Header("Surf Carving")]
@@ -42,8 +45,19 @@ namespace Wayfarer.Movement
         [SerializeField] private float carveRateAtMax = 45f;
         [SerializeField] private float carveBleedPerDegree = 0.15f;
 
+        [Header("Surf Carving - Hold to Sharpen (experimental)")]
+        [Tooltip("Holding a turn in the same direction ramps the carve rate up to this multiplier over turnRampDuration seconds. 1 = no effect.")]
+        [SerializeField] private float turnRampMaxMultiplier = 2.5f;
+        [Tooltip("Seconds of continuously holding the same turn direction to reach turnRampMaxMultiplier.")]
+        [SerializeField] private float turnRampDuration = 1.5f;
+        [Tooltip("Minimum angle (degrees) between current and wish direction to count as \"actively turning\" for ramp purposes.")]
+        [SerializeField] private float turnRampEngageAngle = 2f;
+
         [Header("Surf Slope")]
+        [Tooltip("Speed gained per second, scaled by how steep the downhill slope is (0-1).")]
         [SerializeField] private float slopeAccelFactor = 12f;
+        [Tooltip("Speed lost per second, scaled by how steep the uphill slope is (0-1). Higher than slopeAccelFactor so climbing robs momentum faster than descending builds it.")]
+        [SerializeField] private float uphillDecelFactor = 26f;
 
         [Header("Surf Resource (talent tree will scale this down toward 0)")]
         [SerializeField] private float surfWaterDrainPerSecond = 8f;
@@ -52,13 +66,34 @@ namespace Wayfarer.Movement
         [SerializeField] private float jumpHeight = 1.8f;
 
         [Header("Surf Grounding")]
+        [Tooltip("Extra buffer (in world units, below the feet) the ground raycast checks beyond contact. Small on purpose - this is not a body-height allowance.")]
         [SerializeField] private float groundCheckDistance = 0.3f;
         [SerializeField] private float gravity = -20f;
+
+        [Header("Surf Lean")]
+        [SerializeField] private float leanMaxAngle = 25f;
+        [SerializeField] private float leanSmoothing = 8f;
+        [SerializeField] private bool invertLean = false;
+
+        [Header("Surf Jump Kickflip")]
+        [Tooltip("How long (seconds) the board takes to complete one full 360 spin after a surf jump, and how long the character's Jump animation is shown for.")]
+        [SerializeField] private float kickflipDuration = 0.6f;
 
         private CharacterController controller;
         private Vector3 horizontalVelocity;
         private float verticalVelocity;
         private bool isSurfing;
+
+        private float turnRateDegPerSec;
+        private float turnHoldTime;
+        private float lastTurnSign;
+        private float currentLean;
+        private Quaternion modelBaseLocalRotation = Quaternion.identity;
+        private Quaternion boardBaseLocalRotation = Quaternion.identity;
+        private bool baseRotationsCaptured;
+
+        private bool isKickflipping;
+        private float kickflipElapsed;
 
         public bool IsSurfing => isSurfing;
         public float CurrentSpeed => horizontalVelocity.magnitude;
@@ -95,11 +130,13 @@ namespace Wayfarer.Movement
 
             if (isSurfing)
             {
-                // pick up whatever momentum the player already had from normal movement
+                // Pick up whatever momentum the player already had - including vertical speed,
+                // so activating mid-air (falling or still rising out of a jump) continues
+                // smoothly instead of snapping vertical motion to zero.
                 Vector3 v = controller.velocity;
+                verticalVelocity = v.y;
                 v.y = 0f;
                 horizontalVelocity = v;
-                verticalVelocity = 0f;
             }
             else
             {
@@ -109,6 +146,11 @@ namespace Wayfarer.Movement
                     playerController.AddExternalVelocity(horizontalVelocity);
                 }
                 horizontalVelocity = Vector3.zero;
+                turnRateDegPerSec = 0f;
+                turnHoldTime = 0f;
+                lastTurnSign = 0f;
+
+                EndKickflip();
             }
 
             // Board pops in/out with a puff of snow on both ends of the transition.
@@ -142,11 +184,16 @@ namespace Wayfarer.Movement
             return wishDir;
         }
 
+        // transform.position sits at the character's feet (not center), so the raycast only
+        // needs to check a small buffer below the feet for near-contact - NOT half the body
+        // height, which previously let this report "grounded" up to ~1 unit above the real
+        // surface (the character would visibly float and stop mid-fall while surfing).
         private bool CheckGrounded(out Vector3 normal)
         {
             normal = Vector3.up;
-            Vector3 origin = transform.position + Vector3.up * 0.1f;
-            float rayDist = (controller.height * 0.5f) + groundCheckDistance;
+            float originOffset = 0.1f;
+            Vector3 origin = transform.position + Vector3.up * originOffset;
+            float rayDist = originOffset + groundCheckDistance;
             if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, rayDist, ~0, QueryTriggerInteraction.Ignore))
             {
                 normal = hit.normal;
@@ -155,28 +202,119 @@ namespace Wayfarer.Movement
             return controller.isGrounded;
         }
 
+        private void CaptureBaseRotationsIfNeeded()
+        {
+            if (baseRotationsCaptured) return;
+            if (modelTransform != null) { modelBaseLocalRotation = modelTransform.localRotation; }
+            if (iceBoardVisual != null) { boardBaseLocalRotation = iceBoardVisual.transform.localRotation; }
+            baseRotationsCaptured = true;
+        }
+
         private void Update()
         {
+            CaptureBaseRotationsIfNeeded();
+
+            // Surf can be toggled on or off at any time, grounded or airborne.
             if (surfInput.action.WasPressedThisFrame())
             {
-                if (!isSurfing && CheckGrounded(out _))
-                {
-                    SetSurfing(true);
-                }
-                else if (isSurfing)
-                {
-                    SetSurfing(false);
-                }
+                SetSurfing(!isSurfing);
             }
+
+            UpdateLean();
+            UpdateKickflip();
 
             if (!isSurfing) return;
 
             if (jumpInput.action.WasPressedThisFrame() && CheckGrounded(out _))
             {
                 verticalVelocity = Mathf.Sqrt(jumpHeight * -2f * gravity);
+                StartKickflip();
             }
 
             UpdateSurf();
+        }
+
+        // Purely cosmetic: banks the character mesh and board into turns based on how sharply
+        // we're currently carving, smoothed for fluidity, decaying back to upright when not
+        // turning or not surfing. The CharacterController / root transform stay untouched so
+        // this never affects actual movement or collision.
+        private void UpdateLean()
+        {
+            float targetLean = 0f;
+            if (isSurfing)
+            {
+                float normalizedRate = carveRateAtBase > 0.01f ? Mathf.Clamp(turnRateDegPerSec / carveRateAtBase, -1f, 1f) : 0f;
+                targetLean = -normalizedRate * leanMaxAngle;
+                if (invertLean) targetLean = -targetLean;
+            }
+
+            currentLean = Mathf.Lerp(currentLean, targetLean, 1f - Mathf.Exp(-leanSmoothing * Time.deltaTime));
+
+            if (modelTransform != null)
+            {
+                modelTransform.localRotation = modelBaseLocalRotation * Quaternion.Euler(0f, 0f, currentLean);
+            }
+
+            // While a kickflip is spinning, it takes over the board's rotation entirely (see
+            // UpdateKickflip, which runs after this and overwrites iceBoardVisual's rotation) -
+            // lean still gets applied here first so it resumes seamlessly the instant the flip
+            // finishes.
+            if (iceBoardVisual != null)
+            {
+                iceBoardVisual.transform.localRotation = boardBaseLocalRotation * Quaternion.Euler(0f, 0f, currentLean);
+            }
+        }
+
+        // Jumping while surfing fires the character's normal Jump animation (see StartKickflip)
+        // and spins the board one full 360 degrees around its own forward axis - the direction
+        // of travel, since the player transform is kept facing that way by UpdateSurf's
+        // LookRotation - purely cosmetic, like a skateboard kickflip. Runs on a fixed timer
+        // rather than tracking the actual landing so it stays simple and consistent with the
+        // rest of the surf-jump animation timing.
+        private void UpdateKickflip()
+        {
+            if (!isKickflipping) return;
+
+            kickflipElapsed += Time.deltaTime;
+            float t = kickflipDuration > 0.0001f ? Mathf.Clamp01(kickflipElapsed / kickflipDuration) : 1f;
+
+            if (iceBoardVisual != null)
+            {
+                iceBoardVisual.transform.localRotation = boardBaseLocalRotation * Quaternion.AngleAxis(t * 360f, Vector3.forward);
+            }
+
+            if (t >= 1f)
+            {
+                EndKickflip();
+            }
+        }
+
+        private void StartKickflip()
+        {
+            isKickflipping = true;
+            kickflipElapsed = 0f;
+
+            if (animator != null)
+            {
+                animator.SetBool("IsSurfJumping", true);
+                animator.SetTrigger("Jump");
+            }
+
+            CancelInvoke(nameof(EndSurfJumpAnimation));
+            Invoke(nameof(EndSurfJumpAnimation), kickflipDuration);
+        }
+
+        private void EndKickflip()
+        {
+            isKickflipping = false;
+        }
+
+        private void EndSurfJumpAnimation()
+        {
+            if (animator != null)
+            {
+                animator.SetBool("IsSurfJumping", false);
+            }
         }
 
         private void UpdateSurf()
@@ -194,14 +332,38 @@ namespace Wayfarer.Movement
             float currentSpeed = horizontalVelocity.magnitude;
             Vector3 currentDir = currentSpeed > 0.01f ? horizontalVelocity / currentSpeed : (wishDir.sqrMagnitude > 0.001f ? wishDir : transform.forward);
 
+            float turnAmount = 0f;
+
             if (wishDir.sqrMagnitude > 0.001f)
             {
                 float angleDiff = Vector3.SignedAngle(currentDir, wishDir, Vector3.up);
+
+                // Hold-to-sharpen: track how long we've been continuously steering the same way.
+                // Releasing the turn, going straight, or reversing direction resets the ramp.
+                if (Mathf.Abs(angleDiff) > turnRampEngageAngle)
+                {
+                    float sign = Mathf.Sign(angleDiff);
+                    if (lastTurnSign != 0f && sign != lastTurnSign)
+                    {
+                        turnHoldTime = 0f;
+                    }
+                    lastTurnSign = sign;
+                    turnHoldTime += Time.deltaTime;
+                }
+                else
+                {
+                    turnHoldTime = 0f;
+                    lastTurnSign = 0f;
+                }
+
+                float rampT = turnRampDuration > 0.01f ? Mathf.Clamp01(turnHoldTime / turnRampDuration) : 1f;
+                float turnRampMultiplier = Mathf.Lerp(1f, turnRampMaxMultiplier, rampT);
+
                 float speedRatio = Mathf.Clamp01(Mathf.InverseLerp(surfBaseSpeed, surfMaxSpeed, currentSpeed));
-                float carveRateNow = Mathf.Lerp(carveRateAtBase, carveRateAtMax, speedRatio);
+                float carveRateNow = Mathf.Lerp(carveRateAtBase, carveRateAtMax, speedRatio) * turnRampMultiplier;
                 float maxTurnThisFrame = carveRateNow * Time.deltaTime;
 
-                float turnAmount = Mathf.Clamp(angleDiff, -maxTurnThisFrame, maxTurnThisFrame);
+                turnAmount = Mathf.Clamp(angleDiff, -maxTurnThisFrame, maxTurnThisFrame);
                 currentDir = Quaternion.AngleAxis(turnAmount, Vector3.up) * currentDir;
 
                 float excess = Mathf.Abs(angleDiff) - maxTurnThisFrame;
@@ -219,13 +381,20 @@ namespace Wayfarer.Movement
             else
             {
                 currentSpeed = Mathf.Max(0f, currentSpeed - passiveDecayPerSecond * Time.deltaTime);
+                turnHoldTime = 0f;
+                lastTurnSign = 0f;
             }
 
+            turnRateDegPerSec = Time.deltaTime > 0.0001f ? turnAmount / Time.deltaTime : 0f;
+
+            // Downhill builds speed, uphill robs it - using separate factors so climbing can
+            // scrub momentum harder than descending builds it (asymmetric on purpose).
             Vector3 downSlope = grounded ? Vector3.ProjectOnPlane(Vector3.down, groundNormal).normalized : Vector3.zero;
             if (downSlope.sqrMagnitude > 0.0001f)
             {
                 float slopeDot = Vector3.Dot(currentDir, downSlope);
-                currentSpeed = Mathf.Max(0f, currentSpeed + slopeDot * slopeAccelFactor * Time.deltaTime);
+                float slopeFactor = slopeDot >= 0f ? slopeAccelFactor : uphillDecelFactor;
+                currentSpeed = Mathf.Max(0f, currentSpeed + slopeDot * slopeFactor * Time.deltaTime);
             }
 
             currentSpeed = Mathf.Min(currentSpeed, surfMaxSpeed);

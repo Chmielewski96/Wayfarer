@@ -20,4 +20,7 @@ MonoBehaviour:
   range: 8
   baseDamage: 10
   bonusDamageToFrozen: 40
-  waterBlobAmountPerFrozenTarget: 8
+  waterBlobAmountPerFrozenTarget: 10
+  blobsPerFrozenTarget: 4
+  strikePrefab: {fileID: 3296677525845176479, guid: 8195ceabe9d2f492dae95e07876456bd, type: 3}
+  telegraphDuration: 0.5

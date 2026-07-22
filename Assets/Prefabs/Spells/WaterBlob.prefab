@@ -66,7 +66,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 31321ba15b8f8eb4c954353edc038b1d, type: 2}
+  - {fileID: 2100000, guid: d486158c5077b4e5c88ed9a63fcca6c6, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -159,11 +159,13 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Wayfarer.Spells.WaterBlob
   waterAmount: 5
   lifetime: 20
+  pickupRadius: 1.1
   popRadiusMin: 1.2
   popRadiusMax: 2.8
   popHeight: 2.6
   popDuration: 0.65
   groundRaycastDistance: 20
+  hoverHeight: 0.6
   flowPulseSpeed: 4
   flowPulseAmount: 0.18
   flowDriftRadius: 0.35

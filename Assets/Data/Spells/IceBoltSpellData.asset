@@ -15,7 +15,9 @@ MonoBehaviour:
   spellName: Ice Bolt
   waterCost: 8
   cooldown: 0.5
+  castVfxPrefab: {fileID: 0}
+  vfxLifetime: 3
   projectilePrefab: {fileID: 8987357335880804913, guid: 45220a9374dad454e91d04b13ad0aafc, type: 3}
   damage: 15
-  speed: 25
-  waterBlobAmount: 5
+  speed: 45
+  waterBlobAmount: 10

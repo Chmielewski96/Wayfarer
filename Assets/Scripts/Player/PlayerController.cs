@@ -10,6 +10,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private bool shouldFaceMoveDirection = false;
     [SerializeField] private Animator animator;
     [SerializeField] private float externalVelocityDecay = 8f;
+    [SerializeField] private float groundedExternalVelocityDecay = 25f;
     [SerializeField] private Wayfarer.Player.PlayerSpellCaster spellCaster;
 
     private CharacterController controller;
@@ -57,6 +58,11 @@ public class PlayerController : MonoBehaviour
 
     public bool IsSurfing => isSurfing;
 
+    // Reads live input state (not the animator's Speed, which lags a frame behind input
+    // callbacks) so cast-time decisions like "should this play as a full-body animation"
+    // reflect what the player is doing right now.
+    public bool IsMoving => moveInput.sqrMagnitude > 0.01f;
+
     public void SetSurfing(bool surfing)
     {
         isSurfing = surfing;
@@ -71,15 +77,28 @@ public class PlayerController : MonoBehaviour
         {
             spellCaster.Deselect();
         }
+
+        // externalVelocity's contribution is already folded into controller.velocity, which
+        // IceSurfController reads to seed its own horizontalVelocity the instant surfing starts.
+        // If we don't clear it here, it just sits frozen (Update() below returns early while
+        // surfing, so it never decays) and gets added to AGAIN on the next AddExternalVelocity
+        // call when surf turns back off - rapidly toggling surf on/off compounds this every
+        // cycle and produces runaway speed.
+        if (surfing)
+        {
+            externalVelocity = Vector3.zero;
+        }
     }
 
     // Called when surfing hands movement control back so momentum carries into normal
-    // movement instead of snapping to zero; decays away over externalVelocityDecay units/sec.
+    // movement instead of snapping to zero. Decays at externalVelocityDecay while airborne
+    // (near-ballistic, since there's no surface to scrub speed against), and much faster at
+    // groundedExternalVelocityDecay the moment the character is actually touching the ground
+    // (reads as real ground friction biting once you're no longer sliding on ice).
     public void AddExternalVelocity(Vector3 addedVelocity)
     {
         externalVelocity += addedVelocity;
     }
-
 
     // Update is called once per frame
     void Update()
@@ -101,12 +120,22 @@ public class PlayerController : MonoBehaviour
         right.Normalize();
 
         Vector3 moveDirection = forward * moveInput.y + right * moveInput.x;
-        controller.Move(moveDirection * speed * Time.deltaTime);
+
+        velocity.y += gravity * Time.deltaTime;
+
+        // Everything that moves the character this frame - input-driven movement, leftover surf
+        // momentum, and gravity - is combined into a single Move() call. CharacterController's
+        // isGrounded/velocity are only ever accurate for the most recent Move() call in a frame,
+        // so splitting this across multiple Move() calls (as it used to be) made both of those
+        // reads unreliable for anything checking them later in the frame or from another script
+        // (e.g. IceSurfController re-seeding momentum from controller.velocity on activation).
+        Vector3 totalVelocity = (moveDirection * speed) + externalVelocity + new Vector3(0f, velocity.y, 0f);
+        controller.Move(totalVelocity * Time.deltaTime);
 
         if (externalVelocity.sqrMagnitude > 0.0001f)
         {
-            controller.Move(externalVelocity * Time.deltaTime);
-            externalVelocity = Vector3.MoveTowards(externalVelocity, Vector3.zero, externalVelocityDecay * Time.deltaTime);
+            float decay = controller.isGrounded ? groundedExternalVelocityDecay : externalVelocityDecay;
+            externalVelocity = Vector3.MoveTowards(externalVelocity, Vector3.zero, decay * Time.deltaTime);
         }
 
         if (isAiming)
@@ -119,9 +148,6 @@ public class PlayerController : MonoBehaviour
             Quaternion toRotation = Quaternion.LookRotation(moveDirection, Vector3.up);
             transform.rotation = Quaternion.Slerp(transform.rotation, toRotation, 10f * Time.deltaTime);
         }
-
-        velocity.y += gravity * Time.deltaTime;
-        controller.Move(velocity * Time.deltaTime);
 
         if (animator != null)
         {

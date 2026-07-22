@@ -1013,6 +1013,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Wayfarer.Combat.Freezable
   freezeDuration: 3
+  iceMaterial: {fileID: 2100000, guid: b15384428c3164bcdbbe5214de1faa1f, type: 2}
 --- !u!114 &893590742
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1439,6 +1440,7 @@ MonoBehaviour:
   shouldFaceMoveDirection: 1
   animator: {fileID: 0}
   externalVelocityDecay: 8
+  groundedExternalVelocityDecay: 25
   spellCaster: {fileID: 1155315710}
 --- !u!114 &1155315709
 MonoBehaviour:
@@ -1546,6 +1548,11 @@ MonoBehaviour:
   waterResource: {fileID: 1155315711}
   castOrigin: {fileID: 1600754890}
   aimRayDistance: 200
+  animator: {fileID: 0}
+  upperBodyLayerName: UpperBody
+  iceBoltCastAnimDuration: 1.15
+  shatterCastAnimDuration: 1.5
+  frostConeCastAnimDuration: 1.2
 --- !u!114 &1155315711
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1579,21 +1586,30 @@ MonoBehaviour:
   animator: {fileID: 1396903854}
   iceBoardVisual: {fileID: 1976539231}
   snowPuffVfx: {fileID: 1268773565}
+  modelTransform: {fileID: 1396903853}
   moveInput: {fileID: 150030394617544670, guid: ee64a0ab791714479a839c45522d7fd1, type: 3}
   jumpInput: {fileID: -715383724768970001, guid: ee64a0ab791714479a839c45522d7fd1, type: 3}
   surfInput: {fileID: 3126240152264731473, guid: ee64a0ab791714479a839c45522d7fd1, type: 3}
   surfBaseSpeed: 9
-  surfMaxSpeed: 38
-  surfAccel: 18
+  surfMaxSpeed: 32
+  surfAccel: 5
   passiveDecayPerSecond: 1
   carveRateAtBase: 180
   carveRateAtMax: 45
   carveBleedPerDegree: 0.15
+  turnRampMaxMultiplier: 2.5
+  turnRampDuration: 1.5
+  turnRampEngageAngle: 2
   slopeAccelFactor: 12
+  uphillDecelFactor: 26
   surfWaterDrainPerSecond: 8
   jumpHeight: 1.8
   groundCheckDistance: 0.3
   gravity: -20
+  leanMaxAngle: 25
+  leanSmoothing: 8
+  invertLean: 0
+  kickflipDuration: 0.6
 --- !u!114 &1196712542
 MonoBehaviour:
   m_ObjectHideFlags: 0

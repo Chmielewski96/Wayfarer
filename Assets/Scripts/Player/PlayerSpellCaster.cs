@@ -25,12 +25,34 @@ namespace Wayfarer.Player
         [SerializeField] private Transform castOrigin;
         [SerializeField] private float aimRayDistance = 200f;
 
+        [Header("Cast Animation")]
+        [SerializeField] private Animator animator;
+        [SerializeField] private string upperBodyLayerName = "UpperBody";
+        [SerializeField] private float iceBoltCastAnimDuration = 1.15f;
+        [SerializeField] private float shatterCastAnimDuration = 1.5f;
+        [SerializeField] private float frostConeCastAnimDuration = 1.2f;
+
         private int selectedSlot = -1;
         private readonly float[] cooldownEndTimes = new float[6];
+        private int upperBodyLayerIndex = -1;
+        private const int BaseLayerIndex = 0;
+
+        // Tracks an in-progress stationary (full-body) cast so Update() can hand it off to the
+        // UpperBody layer the instant the player starts moving mid-animation - see PlayCastAnimation.
+        // The state name always matches the trigger name (CastIceBolt/CastShatter/CastFrostCone
+        // exist as identically-named states on both the base and UpperBody layers).
+        private string activeStationaryCastState;
+        private bool stationaryCastHandedOff;
 
         public SpellData SelectedSpell => selectedSlot >= 0 && selectedSlot < spellSlots.Length ? spellSlots[selectedSlot] : null;
 
         public int SelectedSlotIndex => selectedSlot;
+
+        private void Awake()
+        {
+            if (animator == null) { animator = GetComponentInChildren<Animator>(); }
+            if (animator != null) { upperBodyLayerIndex = animator.GetLayerIndex(upperBodyLayerName); }
+        }
 
         private void OnEnable()
         {
@@ -137,7 +159,82 @@ namespace Wayfarer.Player
 
             spell.Cast(context);
             cooldownEndTimes[selectedSlot] = Time.time + spell.cooldown;
+
+            if (spell is IceBoltSpellData)
+            {
+                PlayCastAnimation("CastIceBolt", iceBoltCastAnimDuration);
+            }
+            else if (spell is ShatterSpellData)
+            {
+                PlayCastAnimation("CastShatter", shatterCastAnimDuration);
+            }
+            else if (spell is FrostConeSpellData)
+            {
+                PlayCastAnimation("CastFrostCone", frostConeCastAnimDuration);
+            }
+
             return true;
+        }
+
+        // While moving, the cast plays on the UpperBody layer only (masked to spine/arms/head)
+        // so the base layer keeps driving legs normally - e.g. running continues under the cast.
+        // While stationary, the base layer itself plays the full-body version of the same clip
+        // (its own AnyState transition gated on Speed < 0.1), so legs join in too - the animator
+        // controller picks the right one automatically based on Speed once the trigger fires;
+        // this just decides whether the UpperBody layer needs to be turned on for it, and guards
+        // the base-layer Idle/GoalkeeperIdle transitions via IsCasting so the full-body pose
+        // isn't immediately preempted the frame after the trigger is consumed (Run/AimSidestep
+        // are left unguarded so real movement can always interrupt it - see Update()).
+        private void PlayCastAnimation(string stateName, float duration)
+        {
+            if (animator == null) return;
+
+            bool isMoving = playerController != null && playerController.IsMoving;
+            if (isMoving)
+            {
+                if (upperBodyLayerIndex >= 0) { animator.SetLayerWeight(upperBodyLayerIndex, 1f); }
+                activeStationaryCastState = null;
+            }
+            else
+            {
+                animator.SetBool("IsCasting", true);
+                activeStationaryCastState = stateName;
+                stationaryCastHandedOff = false;
+            }
+
+            animator.SetTrigger(stateName);
+            CancelInvoke(nameof(ClearCastAnimationState));
+            Invoke(nameof(ClearCastAnimationState), duration);
+        }
+
+        private void Update()
+        {
+            // A stationary full-body cast is playing on the base layer, but the player has
+            // started moving mid-animation - the base layer's Run/AimSidestep transitions will
+            // already take the legs the instant Speed > 0.1 (no guard on those), so this just
+            // hands the arm gesture off to the UpperBody layer so it keeps playing on top of
+            // whatever the legs are now doing. We read the base layer's current normalizedTime
+            // and Play() the same state on the UpperBody layer at that exact point, rather than
+            // firing the trigger again, which would restart the clip from frame 0.
+            if (activeStationaryCastState != null && !stationaryCastHandedOff
+                && playerController != null && playerController.IsMoving)
+            {
+                stationaryCastHandedOff = true;
+                if (animator != null && upperBodyLayerIndex >= 0)
+                {
+                    float normalizedTime = animator.GetCurrentAnimatorStateInfo(BaseLayerIndex).normalizedTime;
+                    animator.SetLayerWeight(upperBodyLayerIndex, 1f);
+                    animator.Play(activeStationaryCastState, upperBodyLayerIndex, normalizedTime);
+                }
+            }
+        }
+
+        private void ClearCastAnimationState()
+        {
+            activeStationaryCastState = null;
+            if (animator == null) return;
+            if (upperBodyLayerIndex >= 0) { animator.SetLayerWeight(upperBodyLayerIndex, 0f); }
+            animator.SetBool("IsCasting", false);
         }
     }
 }
