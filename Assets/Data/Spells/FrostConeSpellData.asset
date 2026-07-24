@@ -20,3 +20,5 @@ MonoBehaviour:
   range: 8
   halfAngle: 30
   freezeDuration: 3
+  groundIndicatorPrefab: {fileID: 6211355198229355748, guid: ba223e6669ed34b1ea7b85ee0e975a65, type: 3}
+  groundIndicatorDuration: 1

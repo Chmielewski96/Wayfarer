@@ -170,3 +170,6 @@ MonoBehaviour:
   flowPulseAmount: 0.18
   flowDriftRadius: 0.35
   flowDriftSpeed: 0.8
+  magnetRange: 6
+  magnetMaxSpeed: 6
+  magnetMinSpeed: 0.1

@@ -27,6 +27,8 @@ namespace Wayfarer.Player
 
         [Header("Cast Animation")]
         [SerializeField] private Animator animator;
+        [SerializeField] private GameObject handIceVfxPrefab;
+        [SerializeField] private GameObject handLightningVfxPrefab;
         [SerializeField] private string upperBodyLayerName = "UpperBody";
         [SerializeField] private float iceBoltCastAnimDuration = 1.15f;
         [SerializeField] private float shatterCastAnimDuration = 1.5f;
@@ -36,6 +38,8 @@ namespace Wayfarer.Player
         private readonly float[] cooldownEndTimes = new float[6];
         private int upperBodyLayerIndex = -1;
         private const int BaseLayerIndex = 0;
+        private Transform rightHandSocket;
+        private Transform leftHandSocket;
 
         // Tracks an in-progress stationary (full-body) cast so Update() can hand it off to the
         // UpperBody layer the instant the player starts moving mid-animation - see PlayCastAnimation.
@@ -52,6 +56,11 @@ namespace Wayfarer.Player
         {
             if (animator == null) { animator = GetComponentInChildren<Animator>(); }
             if (animator != null) { upperBodyLayerIndex = animator.GetLayerIndex(upperBodyLayerName); }
+            if (animator != null && animator.isHuman)
+            {
+                rightHandSocket = animator.GetBoneTransform(HumanBodyBones.RightHand);
+                leftHandSocket = animator.GetBoneTransform(HumanBodyBones.LeftHand);
+            }
         }
 
         private void OnEnable()
@@ -163,14 +172,19 @@ namespace Wayfarer.Player
             if (spell is IceBoltSpellData)
             {
                 PlayCastAnimation("CastIceBolt", iceBoltCastAnimDuration);
+                SpawnHandVfx(iceBoltCastAnimDuration, rightHandSocket, handIceVfxPrefab);
             }
             else if (spell is ShatterSpellData)
             {
                 PlayCastAnimation("CastShatter", shatterCastAnimDuration);
+                SpawnHandVfx(shatterCastAnimDuration, rightHandSocket, handLightningVfxPrefab);
+                SpawnHandVfx(shatterCastAnimDuration, leftHandSocket, handLightningVfxPrefab);
             }
             else if (spell is FrostConeSpellData)
             {
                 PlayCastAnimation("CastFrostCone", frostConeCastAnimDuration);
+                SpawnHandVfx(frostConeCastAnimDuration, rightHandSocket, handIceVfxPrefab);
+                SpawnHandVfx(frostConeCastAnimDuration, leftHandSocket, handIceVfxPrefab);
             }
 
             return true;
@@ -206,6 +220,37 @@ namespace Wayfarer.Player
             CancelInvoke(nameof(ClearCastAnimationState));
             Invoke(nameof(ClearCastAnimationState), duration);
         }
+
+
+        // Ice spells (Ice Bolt, Frost Cone) visibly conjure their effect from the caster's hand -
+        // spawn a short-lived cluster of translucent ice-blue orbs parented to the RightHand bone
+        // for the duration of the cast gesture. Not used for Shatter, which strikes the ground
+        // rather than being thrown from the hand.
+        // Ice spells (Ice Bolt, Frost Cone) visibly conjure their effect from the caster's hand(s) -
+        // spawn a short-lived cluster of translucent ice-blue orbs parented to the given hand bone
+        // for the duration of the cast gesture. Ice Bolt is thrown one-handed (right hand only);
+        // Frost Cone is called with both hand sockets so it lights up both hands. Not used for
+        // Shatter, which strikes the ground rather than being conjured from the hands.
+        // Spells that are visibly conjured from the caster's hand(s) spawn a short-lived VFX
+        // parented to the given hand bone for the duration of the cast gesture: ice orbs for Ice
+        // Bolt (right hand only) and Frost Cone (both hands), purple lightning crackle for
+        // Shatter (both hands). Which prefab plays is passed in per call site.
+        private void SpawnHandVfx(float duration, Transform socket, GameObject prefab)
+        {
+            if (prefab == null || socket == null) return;
+
+            var instance = Instantiate(prefab, socket.position, socket.rotation, socket);
+            var vfx = instance.GetComponent<HandCastVfx>();
+            if (vfx != null)
+            {
+                vfx.BeginCast(duration);
+            }
+            else
+            {
+                Destroy(instance, duration + 0.5f);
+            }
+        }
+
 
         private void Update()
         {

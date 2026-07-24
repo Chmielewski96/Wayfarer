@@ -10,6 +10,11 @@ namespace Wayfarer.Spells
     /// meandering drift and liquid pulse until picked up (refills the player's Water resource on
     /// contact) or its lifetime expires.
     ///
+    /// Once landed, if the player wanders within magnetRange the blob turns "magnetic" and its
+    /// hover anchor creeps toward the player, accelerating the closer it gets (see
+    /// UpdateMagnetAnchor) - it still layers the normal drift/pulse on top so it doesn't look
+    /// like it's being reeled in on rails.
+    ///
     /// The visible mesh lives on a child ("Visual") that gets squashed/pulsed for the liquid
     /// look; this root object's scale stays fixed at (1,1,1) so the pickup trigger radius
     /// (sized generously so it's easy to walk into) never gets distorted by that animation.
@@ -35,10 +40,20 @@ namespace Wayfarer.Spells
         [SerializeField] private float flowDriftRadius = 0.35f;
         [SerializeField] private float flowDriftSpeed = 0.8f;
 
+        [Header("Magnetism")]
+        [Tooltip("Distance from the player at which the blob starts drifting toward them.")]
+        [SerializeField] private float magnetRange = 4f;
+        [Tooltip("Anchor speed once the player is right on top of the blob.")]
+        [SerializeField] private float magnetMaxSpeed = 6f;
+        [Tooltip("Anchor speed the instant the blob enters magnetRange.")]
+        [SerializeField] private float magnetMinSpeed = 0.5f;
+
         private Transform visual;
         private Vector3 visualBaseScale;
         private Vector3 startPos;
         private Vector3 landPos;
+        private Vector3 anchorPos;
+        private Transform player;
         private float elapsed;
         private bool landed;
         private float wobbleSeed;
@@ -59,7 +74,11 @@ namespace Wayfarer.Spells
             visualBaseScale = visual != null ? visual.localScale : Vector3.one;
             startPos = transform.position;
             landPos = ComputeLandPosition(startPos);
+            anchorPos = landPos;
             wobbleSeed = Random.Range(0f, 100f);
+
+            var playerController = FindObjectOfType<PlayerController>();
+            player = playerController != null ? playerController.transform : null;
         }
 
         private Vector3 ComputeLandPosition(Vector3 origin)
@@ -107,6 +126,8 @@ namespace Wayfarer.Spells
             }
             else
             {
+                UpdateMagnetAnchor();
+
                 float time = Time.time + wobbleSeed;
 
                 Vector3 drift = new Vector3(
@@ -114,7 +135,7 @@ namespace Wayfarer.Spells
                     0f,
                     Mathf.Cos(time * flowDriftSpeed * 0.7f) * flowDriftRadius);
 
-                transform.position = new Vector3(landPos.x + drift.x, landPos.y + hoverHeight, landPos.z + drift.z);
+                transform.position = new Vector3(anchorPos.x + drift.x, anchorPos.y + hoverHeight, anchorPos.z + drift.z);
 
                 if (visual != null)
                 {
@@ -123,6 +144,28 @@ namespace Wayfarer.Spells
                     visual.localScale = new Vector3(visualBaseScale.x * pulse, visualBaseScale.y * inversePulse, visualBaseScale.z * pulse);
                 }
             }
+        }
+
+        // Walks the hover anchor toward the player whenever they're within magnetRange, going
+        // faster the closer the blob already is - so the pull ramps up rather than snapping to
+        // full speed the instant the player crosses the range boundary. The anchor only tracks
+        // the player on the horizontal plane; hoverHeight above the (fixed) landing ground still
+        // controls height, so the blob doesn't try to climb to the player's head.
+        private void UpdateMagnetAnchor()
+        {
+            if (player == null) return;
+
+            Vector3 anchorFlat = new Vector3(anchorPos.x, 0f, anchorPos.z);
+            Vector3 playerFlat = new Vector3(player.position.x, 0f, player.position.z);
+            float distance = Vector3.Distance(anchorFlat, playerFlat);
+
+            if (distance > magnetRange || distance < 0.001f) return;
+
+            float closeness = 1f - Mathf.Clamp01(distance / magnetRange);
+            float speed = Mathf.Lerp(magnetMinSpeed, magnetMaxSpeed, closeness);
+
+            Vector3 newFlat = Vector3.MoveTowards(anchorFlat, playerFlat, speed * Time.deltaTime);
+            anchorPos = new Vector3(newFlat.x, anchorPos.y, newFlat.z);
         }
 
         private void OnTriggerEnter(Collider other)
