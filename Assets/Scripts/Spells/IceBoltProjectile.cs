@@ -60,6 +60,11 @@ namespace Wayfarer.Spells
             // cast origin and would otherwise immediately expire on its own CharacterController.
             if (other.GetComponentInParent<PlayerController>() != null) return;
 
+            // Water blobs are pickups, not obstacles - without this the bolt would fizzle out
+            // the instant it grazed one (they're not on targetMask), effectively letting a
+            // dropped water blob shield an enemy standing behind/near it. Just pass through.
+            if (other.GetComponentInParent<WaterBlob>() != null) return;
+
             if (((1 << other.gameObject.layer) & targetMask) != 0)
             {
                 var health = other.GetComponentInParent<Health>();

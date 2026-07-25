@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using Wayfarer.Player;
+using Wayfarer.Spells;
 
 namespace Wayfarer.Movement
 {
@@ -11,6 +12,11 @@ namespace Wayfarer.Movement
     /// downhill and launch you at convex transitions (ramp crests/ends), and a Water drain/sec
     /// cost shared with the rest of the Sea kit. Can be toggled on or off at any time, including
     /// mid-air.
+    ///
+    /// Also owns the Q speed-boost while surfing: an instant forward burst that's allowed to
+    /// exceed surfMaxSpeed via a decaying "extra ceiling" (boostBonus), so the character visibly
+    /// overshoots the normal cap and eases back down to it shortly after, rather than snapping
+    /// back or being hard-clamped away entirely.
     ///
     /// Coexists with PlayerController rather than replacing it: PlayerController owns all
     /// normal movement/rotation/jump, and hands off control here only while surfing is active
@@ -79,6 +85,17 @@ namespace Wayfarer.Movement
         [Tooltip("How long (seconds) the board takes to complete one full 360 spin after a surf jump, and how long the character's Jump animation is shown for.")]
         [SerializeField] private float kickflipDuration = 0.6f;
 
+        [Header("Speed Boost (Q while surfing)")]
+        [Tooltip("Instant speed added on top of current speed when boosting - this can push current speed above surfMaxSpeed.")]
+        [SerializeField] private float boostBurstAmount = 10f;
+        [Tooltip("How fast the temporary over-surfMaxSpeed ceiling decays back down per second after a boost.")]
+        [SerializeField] private float boostDecayPerSecond = 16f;
+        [SerializeField] private float boostCooldown = 1.5f;
+        [SerializeField] private float boostWaterCost = 10f;
+        [SerializeField] private GameObject handIceVfxPrefab;
+        [SerializeField] private GameObject sonicBoomRingPrefab;
+        [SerializeField] private float boostHandVfxDuration = 0.35f;
+
         private CharacterController controller;
         private Vector3 horizontalVelocity;
         private float verticalVelocity;
@@ -95,6 +112,14 @@ namespace Wayfarer.Movement
         private bool isKickflipping;
         private float kickflipElapsed;
 
+        // Decaying "extra ceiling" above surfMaxSpeed granted by a boost - UpdateSurf clamps
+        // against (surfMaxSpeed + boostBonus) instead of a flat surfMaxSpeed, so speed can
+        // exceed the normal cap right after boosting and eases back down as this decays to 0.
+        private float boostBonus;
+        private float boostCooldownEndTime;
+        private Transform rightHandSocket;
+        private Transform leftHandSocket;
+
         public bool IsSurfing => isSurfing;
         public float CurrentSpeed => horizontalVelocity.magnitude;
         public float SurfMaxSpeed => surfMaxSpeed;
@@ -102,6 +127,11 @@ namespace Wayfarer.Movement
         private void Awake()
         {
             controller = GetComponent<CharacterController>();
+            if (animator != null && animator.isHuman)
+            {
+                rightHandSocket = animator.GetBoneTransform(HumanBodyBones.RightHand);
+                leftHandSocket = animator.GetBoneTransform(HumanBodyBones.LeftHand);
+            }
         }
 
         private void OnEnable()
@@ -149,6 +179,7 @@ namespace Wayfarer.Movement
                 turnRateDegPerSec = 0f;
                 turnHoldTime = 0f;
                 lastTurnSign = 0f;
+                boostBonus = 0f;
 
                 EndKickflip();
             }
@@ -229,6 +260,14 @@ namespace Wayfarer.Movement
             {
                 verticalVelocity = Mathf.Sqrt(jumpHeight * -2f * gravity);
                 StartKickflip();
+            }
+
+            // Q is free to reuse as a surf-only boost here: PlayerSpellCaster's own Q binding
+            // selects the Ice Bolt spell slot, but spell casting is already deselected the
+            // instant surfing starts (see PlayerController.SetSurfing), so there's no conflict.
+            if (Keyboard.current != null && Keyboard.current.qKey.wasPressedThisFrame)
+            {
+                TryBoost();
             }
 
             UpdateSurf();
@@ -317,6 +356,59 @@ namespace Wayfarer.Movement
             }
         }
 
+        // Instant forward speed burst that's allowed to exceed surfMaxSpeed - see boostBonus,
+        // consumed by UpdateSurf's clamps, which decays back down afterward instead of being
+        // hard-capped immediately. Costs Water and is gated by a cooldown so it can't be
+        // spammed. Visuals: both hands flare with the same ice-orb VFX used for casting, plus an
+        // icy shockwave ring that expands out behind the character like a sonic boom.
+        private void TryBoost()
+        {
+            if (Time.time < boostCooldownEndTime) return;
+            if (waterResource == null || !waterResource.TryConsume(boostWaterCost)) return;
+
+            boostCooldownEndTime = Time.time + boostCooldown;
+            boostBonus += boostBurstAmount;
+
+            Vector3 boostDir = horizontalVelocity.sqrMagnitude > 0.01f ? horizontalVelocity.normalized : transform.forward;
+            float newSpeed = horizontalVelocity.magnitude + boostBurstAmount;
+            horizontalVelocity = boostDir * newSpeed;
+
+            SpawnBoostVfx(boostDir);
+        }
+
+        private void SpawnBoostVfx(Vector3 boostDir)
+        {
+            if (handIceVfxPrefab != null)
+            {
+                SpawnHandBoostVfx(rightHandSocket);
+                SpawnHandBoostVfx(leftHandSocket);
+            }
+
+            if (sonicBoomRingPrefab != null)
+            {
+                Vector3 ringPos = transform.position + Vector3.up * 1f - boostDir * 0.4f;
+                Quaternion ringRot = boostDir.sqrMagnitude > 0.0001f ? Quaternion.LookRotation(boostDir) : transform.rotation;
+                var ring = Instantiate(sonicBoomRingPrefab, ringPos, ringRot);
+                Destroy(ring, 1f);
+            }
+        }
+
+        private void SpawnHandBoostVfx(Transform socket)
+        {
+            if (socket == null) return;
+
+            var instance = Instantiate(handIceVfxPrefab, socket.position, socket.rotation, socket);
+            var vfx = instance.GetComponent<HandCastVfx>();
+            if (vfx != null)
+            {
+                vfx.BeginCast(boostHandVfxDuration);
+            }
+            else
+            {
+                Destroy(instance, boostHandVfxDuration + 0.5f);
+            }
+        }
+
         private void UpdateSurf()
         {
             if (waterResource == null || !waterResource.TryConsume(surfWaterDrainPerSecond * Time.deltaTime))
@@ -324,6 +416,12 @@ namespace Wayfarer.Movement
                 SetSurfing(false);
                 return;
             }
+
+            // The boosted ceiling decays back toward surfMaxSpeed over time rather than
+            // vanishing instantly - this is what makes the post-boost speed ease back down to
+            // normal instead of hard-clamping the frame after.
+            boostBonus = Mathf.Max(0f, boostBonus - boostDecayPerSecond * Time.deltaTime);
+            float effectiveMaxSpeed = surfMaxSpeed + boostBonus;
 
             bool grounded = CheckGrounded(out Vector3 groundNormal);
 
@@ -375,7 +473,7 @@ namespace Wayfarer.Movement
                 float alignment = Vector3.Dot(currentDir, wishDir);
                 if (alignment > 0.3f)
                 {
-                    currentSpeed = Mathf.Min(surfMaxSpeed, currentSpeed + surfAccel * Time.deltaTime);
+                    currentSpeed = Mathf.Min(effectiveMaxSpeed, currentSpeed + surfAccel * Time.deltaTime);
                 }
             }
             else
@@ -397,7 +495,7 @@ namespace Wayfarer.Movement
                 currentSpeed = Mathf.Max(0f, currentSpeed + slopeDot * slopeFactor * Time.deltaTime);
             }
 
-            currentSpeed = Mathf.Min(currentSpeed, surfMaxSpeed);
+            currentSpeed = Mathf.Min(currentSpeed, effectiveMaxSpeed);
             horizontalVelocity = currentDir * currentSpeed;
 
             // While grounded (and not actively launching off a jump), velocity follows the ground

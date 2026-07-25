@@ -1612,6 +1612,13 @@ MonoBehaviour:
   leanSmoothing: 8
   invertLean: 0
   kickflipDuration: 0.6
+  boostBurstAmount: 10
+  boostDecayPerSecond: 16
+  boostCooldown: 1.5
+  boostWaterCost: 10
+  handIceVfxPrefab: {fileID: 5822166808193637389, guid: edb918cf4c97d40b09dea2fbc9956b6c, type: 3}
+  sonicBoomRingPrefab: {fileID: 1891280173518938263, guid: 95c605335a85641f580fef787be28d2c, type: 3}
+  boostHandVfxDuration: 0.35
 --- !u!114 &1196712542
 MonoBehaviour:
   m_ObjectHideFlags: 0
