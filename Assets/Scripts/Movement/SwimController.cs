@@ -179,6 +179,20 @@ namespace Wayfarer.Movement
             splashVfx.Play();
         }
 
+// Forcibly ends swimming outside this controller's own exit paths (jump-out, walking to
+        // shore) - used when something else needs to take over movement immediately, e.g.
+        // NPCInteractable freezing the player for a conversation. Skips the launch/animation
+        // choreography those paths have (no vertical velocity, no Jump trigger) since this
+        // isn't a real exit, just control being handed off elsewhere. Keeps a short
+        // entry-suppression window so CheckWaterEntry doesn't immediately re-trigger swimming
+        // the moment control comes back, in case the character is still standing at/below the
+        // water surface height.
+        public void ForceExitForInteraction()
+        {
+            if (!isSwimming) return;
+            ExitWater(0f, 0.5f);
+        }
+
 private void EnterWater()
         {
             // Surfing ends the moment real water is entered - surf hands its momentum back to

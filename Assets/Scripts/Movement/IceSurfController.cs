@@ -256,6 +256,13 @@ private void Awake()
 
 private void Update()
         {
+            // A conversation freezes PlayerController's own Update() and forcibly ends surf
+            // the moment it starts (see NPCInteractable.StartDialogue), but this Update() runs
+            // independently of that - without this guard, the surf toggle/jump/boost inputs
+            // would still be processed and could re-activate surfing (or fire a kickflip)
+            // right underneath a supposedly-frozen conversation.
+            if (playerController != null && playerController.IsTalking) return;
+
             CaptureBaseRotationsIfNeeded();
 
             // Surf can be toggled OFF at any time; turning it ON is gated (see CanActivateSurf).
@@ -400,6 +407,15 @@ private void Update()
         private void EndKickflip()
         {
             isKickflipping = false;
+
+            // Cancel any pending natural end-of-kickflip callback and apply it immediately
+            // instead - SetSurfing(false) can be called mid-flip (surf toggled off manually,
+            // or something else force-ending it, e.g. an NPC interaction), and without this
+            // the IsSurfJumping animator bool would otherwise stay true until the original
+            // timer catches up, showing a jump pose for a stray fraction of a second after
+            // surf has already ended.
+            CancelInvoke(nameof(EndSurfJumpAnimation));
+            EndSurfJumpAnimation();
         }
 
         private void EndSurfJumpAnimation()

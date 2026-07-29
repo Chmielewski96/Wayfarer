@@ -133,6 +133,12 @@ namespace Wayfarer.Player
         // key switches to it.
         public void SelectSlot(int index)
         {
+            // Arming a spell while a conversation is open would show the aim-ready pose and
+            // selection UI underneath a frozen, camera-locked dialogue - block it here rather
+            // than relying on OnCastPerformed's IsAiming/IsSwimming gate, which only stops the
+            // actual cast, not the selection itself.
+            if (playerController != null && playerController.IsTalking) return;
+
             if (index < 0 || index >= spellSlots.Length) return;
             if (spellSlots[index] == null) return;
 

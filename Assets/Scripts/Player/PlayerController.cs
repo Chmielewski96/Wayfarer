@@ -19,6 +19,7 @@ public class PlayerController : MonoBehaviour
     private bool isAiming;
     private bool isSurfing;
     private bool isSwimming;
+    private bool isTalking;
     private Vector3 externalVelocity;
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
@@ -38,7 +39,13 @@ public class PlayerController : MonoBehaviour
 
     public void OnJump(InputAction.CallbackContext context)
     {
-        if (isSurfing || isSwimming) return;
+        // Unlike movement, this is an input event callback fired directly by the Input
+        // System - not something Update()'s early-return while talking already covers. Left
+        // unguarded, pressing Jump during a conversation would still fire the Jump animation
+        // trigger (visibly breaking the frozen, camera-locked dialogue pose) and set
+        // velocity.y, which Update() wouldn't apply yet but would suddenly resume as an
+        // unwanted leap the instant the conversation ends.
+        if (isSurfing || isSwimming || isTalking) return;
 
         if (context.performed && controller.isGrounded)
         {
@@ -60,6 +67,41 @@ public class PlayerController : MonoBehaviour
     public bool IsSurfing => isSurfing;
 
     public bool IsSwimming => isSwimming;
+
+    public bool IsTalking => isTalking;
+
+    // Mirrors SetSurfing/SetSwimming - NPCInteractable calls this while a dialogue box is open
+    // so the character stands still and faces the NPC instead of being walkable mid-conversation.
+    // Unlike surf/swim there's no momentum to hand off (talking doesn't interrupt in-flight
+    // physics), so this only needs to freeze/unfreeze Update(), not touch velocity.
+    public void SetTalking(bool talking)
+    {
+        isTalking = talking;
+        if (talking && spellCaster != null)
+        {
+            spellCaster.Deselect();
+        }
+
+        if (talking)
+        {
+            // Update() below early-returns for the whole conversation, so any velocity
+            // sitting here would otherwise resume the instant talking ends - a leftover
+            // surf-momentum handoff (see IceSurfController.SetSurfing) or an in-progress
+            // jump's vertical speed would suddenly kick back in as an unexpected burst of
+            // motion right as the dialogue box closes. NPCInteractable is responsible for
+            // actually stopping any alternate movement controller (surf/swim) and planting
+            // the character on the ground before calling this; this just guarantees no stale
+            // velocity survives the freeze either way.
+            externalVelocity = Vector3.zero;
+            velocity = Vector3.zero;
+
+            if (animator != null)
+            {
+                animator.SetFloat("Speed", 0f);
+                animator.SetBool("IsGrounded", true);
+            }
+        }
+    }
 
     // Reads live input state (not the animator's Speed, which lags a frame behind input
     // callbacks) so cast-time decisions like "should this play as a full-body animation"
@@ -152,7 +194,7 @@ public class PlayerController : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        if (isSurfing || isSwimming) return;
+        if (isSurfing || isSwimming || isTalking) return;
 
         if (controller.isGrounded && velocity.y < 0f)
         {

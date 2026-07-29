@@ -16,10 +16,13 @@ public class AimCameraController : MonoBehaviour
     [SerializeField] private float pitchMin = -40f;
     [SerializeField] private float pitchMax = 80f;
 
+    [SerializeField] private float eyeHeight = 1.5f;
+
     private CinemachineThirdPersonFollow aimCam;
 
     private float yaw;
     private float pitch;
+    private bool locked;
 
     private void Awake()
     {
@@ -35,6 +38,35 @@ public class AimCameraController : MonoBehaviour
         yawTarget.rotation = Quaternion.Euler(0f, yaw, 0f);
         pitchTarget.localRotation = Quaternion.Euler(pitch, 0f, 0f);
     }
+
+    // Points the camera at a fixed world position (an NPC's head, during dialogue) and stops
+    // Update() from applying live look input until Unlock() is called - a plain
+    // SyncToCurrentOrientation-style snap only sets the starting direction once, but mouse/
+    // gamepad look input would keep steering away from it every subsequent frame, so
+    // "locked on" needs Update() itself gated too, not just an initial angle.
+    public void LockOnto(Vector3 worldPosition)
+    {
+        Vector3 origin = (yawTarget != null ? yawTarget.position : transform.position) + Vector3.up * eyeHeight;
+        Vector3 direction = worldPosition - origin;
+
+        if (direction.sqrMagnitude > 0.0001f)
+        {
+            Vector3 angles = Quaternion.LookRotation(direction.normalized, Vector3.up).eulerAngles;
+            yaw = angles.y;
+            pitch = angles.x > 180f ? angles.x - 360f : angles.x;
+            pitch = Mathf.Clamp(pitch, pitchMin, pitchMax);
+
+            yawTarget.rotation = Quaternion.Euler(0f, yaw, 0f);
+            pitchTarget.localRotation = Quaternion.Euler(pitch, 0f, 0f);
+        }
+
+        locked = true;
+    }
+
+    public void Unlock()
+    {
+        locked = false;
+    }
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
@@ -48,6 +80,8 @@ public class AimCameraController : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
+        if (locked) return;
+
         Vector2 look = lookInput.action.ReadValue<Vector2>();
 
         if (Mouse.current != null && Mouse.current.delta.IsActuated())
