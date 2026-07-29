@@ -14,6 +14,11 @@ namespace Wayfarer.Spells
         [SerializeField] private float lifetime = 5f;
         [Tooltip("Maximum distance the bolt can travel before it expires in a puff of snow, even without hitting anything.")]
         [SerializeField] private float maxTravelDistance = 12f;
+
+        // Read by SpellRangeIndicatorController to size the ground range ring shown while Ice
+        // Bolt is armed - this is the single source of truth for the bolt's effective range, so
+        // the preview can't drift out of sync with the actual projectile behavior above.
+        public float MaxTravelDistance => maxTravelDistance;
         [SerializeField] private GameObject impactPuffPrefab;
         [SerializeField] private float impactPuffLifetime = 1f;
 

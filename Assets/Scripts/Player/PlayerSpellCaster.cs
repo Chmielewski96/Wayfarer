@@ -52,6 +52,34 @@ namespace Wayfarer.Player
 
         public int SelectedSlotIndex => selectedSlot;
 
+        // Exposed for SpellRangeIndicatorController, so its live ground preview uses exactly
+        // the same cast origin and target mask a real cast would (falls back to transform the
+        // same way TryCast's own SpellCastContext.Origin does).
+        public Transform CastOrigin => castOrigin != null ? castOrigin : transform;
+        public LayerMask TargetMask => targetMask;
+
+        // Read-only accessors for UI (spell bar cooldown overlays).
+        public SpellData GetSpellInSlot(int index)
+        {
+            return index >= 0 && index < spellSlots.Length ? spellSlots[index] : null;
+        }
+
+        public float GetCooldownRemaining(int index)
+        {
+            if (index < 0 || index >= cooldownEndTimes.Length) return 0f;
+            return Mathf.Max(0f, cooldownEndTimes[index] - Time.time);
+        }
+
+        // Human-readable key for a slot's select binding (e.g. "Q"), read from the actual
+        // input action so UI labels stay correct if bindings are ever remapped.
+        public string GetSlotKeyLabel(int index)
+        {
+            if (index < 0 || index >= selectInputs.Length) return string.Empty;
+            var reference = selectInputs[index];
+            if (reference == null || reference.action == null) return string.Empty;
+            return reference.action.GetBindingDisplayString();
+        }
+
         private void Awake()
         {
             if (animator == null) { animator = GetComponentInChildren<Animator>(); }
@@ -127,7 +155,9 @@ namespace Wayfarer.Player
             Deselect();
         }
 
-        private Vector3 ComputeAimPoint()
+        // Public so SpellRangeIndicatorController can read the live cursor/aim world point
+        // each frame to preview where a ground-targeted cast (Shatter) would currently land.
+public Vector3 ComputeAimPoint()
         {
             var cam = Camera.main;
             if (cam == null)
@@ -136,9 +166,20 @@ namespace Wayfarer.Player
             }
 
             Ray ray = new Ray(cam.transform.position, cam.transform.forward);
-            if (Physics.Raycast(ray, out RaycastHit hit, aimRayDistance, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+
+            // RaycastAll + skip self, not a plain single-hit Raycast: a third-person camera
+            // sits close behind/above the character, so a naive raycast can clip the player's
+            // own collider first (their neck/shoulder) before ever reaching whatever's actually
+            // being aimed at - producing an aim point sitting right on the player's own body
+            // (very visible on the Shatter strike-zone indicator, which tracks this every
+            // frame) instead of out in the world. Mirrors the existing "never hit yourself"
+            // pattern already used by IceBoltProjectile.OnTriggerEnter.
+            var hits = Physics.RaycastAll(ray, aimRayDistance, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+            System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+            for (int i = 0; i < hits.Length; i++)
             {
-                return hit.point;
+                if (hits[i].collider.transform.root == transform.root) continue;
+                return hits[i].point;
             }
 
             return ray.origin + ray.direction * aimRayDistance;
@@ -146,7 +187,7 @@ namespace Wayfarer.Player
 
         private void OnCastPerformed(InputAction.CallbackContext context)
         {
-            if (playerController == null || !playerController.IsAiming) return;
+            if (playerController == null || !playerController.IsAiming || playerController.IsSwimming) return;
             TryCast();
         }
 

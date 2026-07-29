@@ -34,6 +34,8 @@ namespace Wayfarer.Movement
         [SerializeField] private GameObject iceBoardVisual;
         [SerializeField] private ParticleSystem snowPuffVfx;
         [SerializeField] private Transform modelTransform;
+        [Tooltip("Optional - auto-found on the same GameObject. Surf activation is blocked while swimming (board on water makes no sense); SwimController also force-ends surf on water entry.")]
+        [SerializeField] private SwimController swimController;
 
         [Header("Input")]
         [SerializeField] private InputActionReference moveInput;
@@ -67,6 +69,12 @@ namespace Wayfarer.Movement
 
         [Header("Surf Resource (talent tree will scale this down toward 0)")]
         [SerializeField] private float surfWaterDrainPerSecond = 8f;
+
+        [Header("Surf Activation Gating")]
+        [Tooltip("Minimum seconds between surf activations - stops toggle-mashing from repeatedly exploiting the activation momentum grab and dodging the per-second drain.")]
+        [SerializeField] private float activationCooldown = 1.5f;
+        [Tooltip("Minimum Water required to turn surf on. Once active, drain works normally down to 0 - this only gates entry so surf can't be flickered on at near-zero Water.")]
+        [SerializeField] private float minWaterToActivate = 5f;
 
         [Header("Jump")]
         [SerializeField] private float jumpHeight = 1.8f;
@@ -117,6 +125,7 @@ namespace Wayfarer.Movement
         // exceed the normal cap right after boosting and eases back down as this decays to 0.
         private float boostBonus;
         private float boostCooldownEndTime;
+        private float nextActivationAllowedTime;
         private Transform rightHandSocket;
         private Transform leftHandSocket;
 
@@ -124,9 +133,13 @@ namespace Wayfarer.Movement
         public float CurrentSpeed => horizontalVelocity.magnitude;
         public float SurfMaxSpeed => surfMaxSpeed;
 
-        private void Awake()
+private void Awake()
         {
             controller = GetComponent<CharacterController>();
+            if (swimController == null)
+            {
+                swimController = GetComponent<SwimController>();
+            }
             if (animator != null && animator.isHuman)
             {
                 rightHandSocket = animator.GetBoneTransform(HumanBodyBones.RightHand);
@@ -241,14 +254,22 @@ namespace Wayfarer.Movement
             baseRotationsCaptured = true;
         }
 
-        private void Update()
+private void Update()
         {
             CaptureBaseRotationsIfNeeded();
 
-            // Surf can be toggled on or off at any time, grounded or airborne.
+            // Surf can be toggled OFF at any time; turning it ON is gated (see CanActivateSurf).
             if (surfInput.action.WasPressedThisFrame())
             {
-                SetSurfing(!isSurfing);
+                if (isSurfing)
+                {
+                    SetSurfing(false);
+                }
+                else if (CanActivateSurf())
+                {
+                    SetSurfing(true);
+                    nextActivationAllowedTime = Time.time + activationCooldown;
+                }
             }
 
             UpdateLean();
@@ -272,6 +293,39 @@ namespace Wayfarer.Movement
 
             UpdateSurf();
         }
+
+// Gates for turning surf ON via the player's toggle input (code-driven SetSurfing,
+        // e.g. swim force-ending surf, is intentionally not restricted):
+        // - not while swimming or physically inside the water volume (the volume check
+        //   catches the jump-out grace window, when IsSwimming briefly reads false underwater)
+        // - a short cooldown between activations, so mashing the toggle can't repeatedly
+        //   grab activation momentum or flicker the drain on and off
+        // - a minimum Water floor to enter; once active, the normal per-second drain applies
+        //   all the way down to 0 as before
+        private bool CanActivateSurf()
+        {
+            if (swimController != null &&
+                (swimController.IsSwimming || swimController.IsInWaterVolume(transform.position)))
+            {
+                return false;
+            }
+
+            if (Time.time < nextActivationAllowedTime)
+            {
+                return false;
+            }
+
+            if (waterResource != null && !waterResource.HasEnough(minWaterToActivate))
+            {
+                // Pre-check only (nothing consumed), so fire the insufficient-Water signal
+                // explicitly - TryConsume isn't involved here to do it for us.
+                waterResource.NotifyInsufficientWater();
+                return false;
+            }
+
+            return true;
+        }
+
 
         // Purely cosmetic: banks the character mesh and board into turns based on how sharply
         // we're currently carving, smoothed for fluidity, decaying back to upright when not
@@ -411,6 +465,19 @@ namespace Wayfarer.Movement
 
         private void UpdateSurf()
         {
+            // Hard stop if surfing ever ends up inside the water volume (e.g. activated
+            // mid-air over water and descended below the surface during swim's jump-out
+            // grace window, when water entry re-detection is suppressed). Ending it here
+            // immediately - rather than waiting out the grace period - also prevents surf
+            // gravity/boost speeds from tunneling the character through the terrain
+            // collider underwater. PlayerController takes over; swim re-engages on its own
+            // once the grace window expires.
+            if (swimController != null && swimController.IsInWaterVolume(transform.position))
+            {
+                SetSurfing(false);
+                return;
+            }
+
             if (waterResource == null || !waterResource.TryConsume(surfWaterDrainPerSecond * Time.deltaTime))
             {
                 SetSurfing(false);

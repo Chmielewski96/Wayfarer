@@ -18,6 +18,7 @@ public class PlayerController : MonoBehaviour
     private Vector3 velocity;
     private bool isAiming;
     private bool isSurfing;
+    private bool isSwimming;
     private Vector3 externalVelocity;
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
@@ -37,7 +38,7 @@ public class PlayerController : MonoBehaviour
 
     public void OnJump(InputAction.CallbackContext context)
     {
-        if (isSurfing) return;
+        if (isSurfing || isSwimming) return;
 
         if (context.performed && controller.isGrounded)
         {
@@ -57,6 +58,8 @@ public class PlayerController : MonoBehaviour
     public bool IsAiming => isAiming;
 
     public bool IsSurfing => isSurfing;
+
+    public bool IsSwimming => isSwimming;
 
     // Reads live input state (not the animator's Speed, which lags a frame behind input
     // callbacks) so cast-time decisions like "should this play as a full-body animation"
@@ -90,6 +93,43 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    // Mirrors SetSurfing - SwimController takes over movement entirely while swimming, same
+    // coexistence pattern as IceSurfController. Deselecting the spellcaster here matches how
+    // surfing already does it; casting itself is also independently blocked in
+    // PlayerSpellCaster (checks IsSwimming) so a cast already in flight when entering water
+    // can't be re-triggered either.
+    public void SetSwimming(bool swimming)
+    {
+        isSwimming = swimming;
+        if (animator != null)
+        {
+            animator.SetBool("IsInWater", swimming);
+        }
+
+        if (swimming && spellCaster != null)
+        {
+            spellCaster.Deselect();
+        }
+
+        if (swimming)
+        {
+            externalVelocity = Vector3.zero;
+            velocity = Vector3.zero;
+
+            // Update() below early-returns for the entire duration of the swim, so IsGrounded
+            // and Speed would otherwise sit frozen at whatever they were the instant before
+            // entering water - SwimController's ExitWater relies on IsGrounded being live and
+            // accurate at the moment swimming ends (it re-syncs it there from the real
+            // CharacterController state), but resetting it here too keeps things correct for
+            // the whole swim, not just the tail end.
+            if (animator != null)
+            {
+                animator.SetBool("IsGrounded", false);
+                animator.SetFloat("Speed", 0f);
+            }
+        }
+    }
+
     // Called when surfing hands movement control back so momentum carries into normal
     // movement instead of snapping to zero. Decays at externalVelocityDecay while airborne
     // (near-ballistic, since there's no surface to scrub speed against), and much faster at
@@ -100,10 +140,19 @@ public class PlayerController : MonoBehaviour
         externalVelocity += addedVelocity;
     }
 
+    // Sets pure vertical velocity directly (bypassing externalVelocity's decay, which is
+    // tuned for horizontal momentum handoff like surf/swim-exit ground friction and would eat
+    // into a vertical launch before gravity can arc it). Mirrors how OnJump sets velocity.y
+    // for a normal jump, so a swim jump-out follows the same clean gravity arc.
+    public void SetVerticalVelocity(float y)
+    {
+        velocity.y = y;
+    }
+
     // Update is called once per frame
     void Update()
     {
-        if (isSurfing) return;
+        if (isSurfing || isSwimming) return;
 
         if (controller.isGrounded && velocity.y < 0f)
         {

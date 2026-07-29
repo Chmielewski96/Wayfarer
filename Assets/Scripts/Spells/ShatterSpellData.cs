@@ -16,7 +16,10 @@ namespace Wayfarer.Spells
     [CreateAssetMenu(menuName = "Wayfarer/Spells/Shatter", fileName = "ShatterSpellData")]
     public class ShatterSpellData : SpellData
     {
+        [Tooltip("Blast radius at the impact point - how far the strike's damage reaches from where it lands, NOT how far the player can target it (see castRange).")]
         public float range = 8f;
+        [Tooltip("Max distance from the caster the ground target point can be. Aiming further than this clamps the strike to land at the edge of range, in the aimed direction, rather than letting it land anywhere the camera can see.")]
+        public float castRange = 15f;
         public float baseDamage = 10f;
         public float bonusDamageToFrozen = 40f;
         public float waterBlobAmountPerFrozenTarget = 8f;
@@ -27,7 +30,7 @@ namespace Wayfarer.Spells
         [Tooltip("Seconds between casting (telegraph circle appears) and the actual thunder strike.")]
         public float telegraphDuration = 0.5f;
 
-        public override void Cast(SpellCastContext context)
+public override void Cast(SpellCastContext context)
         {
             if (strikePrefab == null)
             {
@@ -35,7 +38,8 @@ namespace Wayfarer.Spells
                 return;
             }
 
-            Vector3 groundPos = ResolveGroundPosition(context.AimPoint, context.TargetMask);
+            Vector3 groundPos = GroundTargetingUtility.ResolveGroundPosition(context.AimPoint, context.TargetMask);
+            groundPos = GroundTargetingUtility.ClampToRange(groundPos, context.Origin.position, castRange, context.TargetMask);
 
             var instance = Object.Instantiate(strikePrefab, groundPos, Quaternion.identity);
             var controller = instance.GetComponent<ShatterStrikeController>();
@@ -45,24 +49,6 @@ namespace Wayfarer.Spells
                     waterBlobAmountPerFrozenTarget, blobsPerFrozenTarget,
                     context.TargetMask, context.WaterBlobPrefab);
             }
-        }
-
-        // AimPoint can land on a target's own body (e.g. aiming at an enemy hits their collider
-        // partway up, not the ground beneath them) rather than the actual ground - so the
-        // downward snap-to-ground raycast explicitly excludes target-layer colliders (and the
-        // Ignore Raycast layer) to make sure it passes through the enemy and lands on the real
-        // terrain/environment underneath instead of re-hitting the same body.
-        private Vector3 ResolveGroundPosition(Vector3 aimPoint, LayerMask targetMask)
-        {
-            int ignoreRaycastLayer = 1 << 2;
-            int groundMask = ~(targetMask.value | ignoreRaycastLayer);
-
-            Vector3 rayOrigin = aimPoint + Vector3.up * 2f;
-            if (Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit hit, 10f, groundMask, QueryTriggerInteraction.Ignore))
-            {
-                return hit.point;
-            }
-            return aimPoint;
         }
     }
 }
