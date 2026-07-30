@@ -20,6 +20,7 @@ public class PlayerController : MonoBehaviour
     private bool isSurfing;
     private bool isSwimming;
     private bool isTalking;
+    private bool isMenuOpen;
     private Vector3 externalVelocity;
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
@@ -45,7 +46,7 @@ public class PlayerController : MonoBehaviour
         // trigger (visibly breaking the frozen, camera-locked dialogue pose) and set
         // velocity.y, which Update() wouldn't apply yet but would suddenly resume as an
         // unwanted leap the instant the conversation ends.
-        if (isSurfing || isSwimming || isTalking) return;
+        if (isSurfing || isSwimming || isTalking || isMenuOpen) return;
 
         if (context.performed && controller.isGrounded)
         {
@@ -69,6 +70,35 @@ public class PlayerController : MonoBehaviour
     public bool IsSwimming => isSwimming;
 
     public bool IsTalking => isTalking;
+
+    public bool IsMenuOpen => isMenuOpen;
+
+    // Mirrors SetTalking - JournalUI calls this while the quest journal is open, so movement
+    // and jump/surf/spell-arming input can't sneak through behind a full-screen menu the same
+    // way they briefly could behind NPC dialogue before that was fixed. Kept as a separate
+    // flag from isTalking (rather than reusing it) since the two are conceptually different
+    // triggers even though they freeze the same things - a future menu shouldn't have to pretend
+    // it's "talking to an NPC" just to get the freeze behavior.
+    public void SetMenuOpen(bool menuOpen)
+    {
+        isMenuOpen = menuOpen;
+        if (menuOpen && spellCaster != null)
+        {
+            spellCaster.Deselect();
+        }
+
+        if (menuOpen)
+        {
+            externalVelocity = Vector3.zero;
+            velocity = Vector3.zero;
+
+            if (animator != null)
+            {
+                animator.SetFloat("Speed", 0f);
+                animator.SetBool("IsGrounded", true);
+            }
+        }
+    }
 
     // Mirrors SetSurfing/SetSwimming - NPCInteractable calls this while a dialogue box is open
     // so the character stands still and faces the NPC instead of being walkable mid-conversation.
@@ -194,7 +224,7 @@ public class PlayerController : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        if (isSurfing || isSwimming || isTalking) return;
+        if (isSurfing || isSwimming || isTalking || isMenuOpen) return;
 
         if (controller.isGrounded && velocity.y < 0f)
         {

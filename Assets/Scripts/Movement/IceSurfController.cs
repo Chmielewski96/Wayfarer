@@ -261,7 +261,7 @@ private void Update()
             // independently of that - without this guard, the surf toggle/jump/boost inputs
             // would still be processed and could re-activate surfing (or fire a kickflip)
             // right underneath a supposedly-frozen conversation.
-            if (playerController != null && playerController.IsTalking) return;
+            if (playerController != null && (playerController.IsTalking || playerController.IsMenuOpen)) return;
 
             CaptureBaseRotationsIfNeeded();
 

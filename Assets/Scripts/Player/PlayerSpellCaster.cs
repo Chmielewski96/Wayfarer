@@ -137,7 +137,7 @@ namespace Wayfarer.Player
             // selection UI underneath a frozen, camera-locked dialogue - block it here rather
             // than relying on OnCastPerformed's IsAiming/IsSwimming gate, which only stops the
             // actual cast, not the selection itself.
-            if (playerController != null && playerController.IsTalking) return;
+            if (playerController != null && (playerController.IsTalking || playerController.IsMenuOpen)) return;
 
             if (index < 0 || index >= spellSlots.Length) return;
             if (spellSlots[index] == null) return;

@@ -26,6 +26,18 @@ public class NPCInteractable : MonoBehaviour
     [Header("In-Range Feedback")]
     [SerializeField] private GameObject promptRoot;
 
+    [Header("Quest (placeholder)")]
+    [Tooltip("When on, this NPC ignores dialogueLines above and instead runs the placeholder fetch-quest flow below (built on the existing seashell collection system as a stand-in for a real quest/inventory system).")]
+    [SerializeField] private bool enableQuest = true;
+    [SerializeField] private int seashellQuestTarget = 1;
+    [Tooltip("Stable id this quest is tracked under in QuestManager/the Journal - keep unique per quest-giver.")]
+    [SerializeField] private string questId = "villager_seashell";
+    [SerializeField] private string questTitle = "A Lost Seashell";
+
+    private enum QuestState { NotOffered, Accepted, Completed }
+    [Tooltip("Persists only for this play session (not saved) - reset to NotOffered when you re-enter Play mode.")]
+    [SerializeField] private QuestState questState = QuestState.NotOffered;
+
     [Header("Camera")]
     [Tooltip("Optional - auto-found by child name 'CameraFocusPoint'. Where the locked-on dialogue camera aims instead of the NPC's own position - lets the shot be biased off-center (e.g. slightly left) instead of dead-centering the NPC's face. Only meaningful because the NPC always turns to face the player when a conversation starts (see StartDialogue), so an offset defined in the NPC's own local space maps to a consistent, predictable side of the screen every time. Falls back to an approximate head-height point on the NPC itself if not set.")]
     [SerializeField] private Transform cameraFocusPoint;
@@ -92,7 +104,8 @@ public class NPCInteractable : MonoBehaviour
 
         if (playerInRange
             && Keyboard.current != null && Keyboard.current[interactKey].wasPressedThisFrame
-            && DialogueUI.Instance != null && !DialogueUI.Instance.IsOpen)
+            && DialogueUI.Instance != null && !DialogueUI.Instance.IsOpen
+            && (JournalUI.Instance == null || !JournalUI.Instance.IsOpen))
         {
             StartDialogue();
         }
@@ -152,7 +165,155 @@ public class NPCInteractable : MonoBehaviour
             cameraSwitcher.SetNpcInteractionActive(true, focusPoint);
         }
 
-        DialogueUI.Instance.Open(npcName, dialogueLines, OnDialogueClosed);
+        BeginConversationContent();
+    }
+
+    // Picks which conversation to open based on quest state. Kept separate from the
+    // interruption/camera/facing setup above so that logic (which every NPC needs) doesn't
+    // get tangled up with this NPC's specific placeholder narrative content.
+    private void BeginConversationContent()
+    {
+        if (!enableQuest)
+        {
+            DialogueUI.Instance.Open(npcName, dialogueLines, OnDialogueClosed);
+            return;
+        }
+
+        switch (questState)
+        {
+            case QuestState.Accepted:
+                OpenQuestCheckIn();
+                break;
+            case QuestState.Completed:
+                OpenQuestCompletedFlavor();
+                break;
+            case QuestState.NotOffered:
+            default:
+                OpenQuestOffer();
+                break;
+        }
+    }
+
+    // Placeholder quest, step 1: offer it. "I'll help" hands the player off to the existing
+    // seashell-collection system (SeashellManager/SeashellCollectible) as the quest's actual
+    // objective, rather than inventing a separate item/inventory system just for this.
+    private void OpenQuestOffer()
+    {
+        string[] intro =
+        {
+            "Oh - a traveler! Haven't seen a new face around here in some time.",
+            "Actually... you look like someone who doesn't mind getting their feet wet.",
+            "I lost a seashell somewhere along the shore. Would you bring it back to me?"
+        };
+
+        var choices = new DialogueUI.DialogueChoice[]
+        {
+            new DialogueUI.DialogueChoice
+            {
+                Label = "I'll find it for you.",
+                OnChosen = () =>
+                {
+                    questState = QuestState.Accepted;
+                    ReportQuestProgress();
+                    DialogueUI.Instance.ShowLines(new[]
+                    {
+                        "Wonderful! Look for it along the shoreline - you can't miss the sparkle."
+                    });
+                }
+            },
+            new DialogueUI.DialogueChoice
+            {
+                Label = "Not right now.",
+                OnChosen = () =>
+                {
+                    DialogueUI.Instance.ShowLines(new[]
+                    {
+                        "No trouble at all. Come find me if you change your mind."
+                    });
+                }
+            }
+        };
+
+        DialogueUI.Instance.Open(npcName, intro, choices, OnDialogueClosed);
+    }
+
+    // Placeholder quest, step 2: check progress. SeashellManager.TotalCollected is a running,
+    // scene-wide total (not specific to this quest), which is a fine stand-in for now since
+    // there's only ever one active fetch-quest in this placeholder.
+    private void OpenQuestCheckIn()
+    {
+        int collected = SeashellManager.Instance != null ? SeashellManager.Instance.TotalCollected : 0;
+
+        if (collected >= seashellQuestTarget)
+        {
+            string[] lines = { "Is that the seashell? You actually found it!" };
+
+            var choices = new DialogueUI.DialogueChoice[]
+            {
+                new DialogueUI.DialogueChoice
+                {
+                    Label = "Here you go.",
+                    OnChosen = () =>
+                    {
+                        questState = QuestState.Completed;
+                        ReportQuestProgress();
+                        DialogueUI.Instance.ShowLines(new[]
+                        {
+                            "Thank you, truly. I won't forget this."
+                        });
+                    }
+                },
+                new DialogueUI.DialogueChoice
+                {
+                    Label = "Not yet, one moment.",
+                    OnChosen = () =>
+                    {
+                        DialogueUI.Instance.ShowLines(new[] { "Take your time." });
+                    }
+                }
+            };
+
+            DialogueUI.Instance.Open(npcName, lines, choices, OnDialogueClosed);
+        }
+        else
+        {
+            string[] lines = { "Any luck finding that seashell along the shore?" };
+            DialogueUI.Instance.Open(npcName, lines, OnDialogueClosed);
+        }
+    }
+
+    // Pushes the quest's current state/description into QuestManager so the Journal (opened
+    // with J) reflects it. Called whenever questState changes, not on every conversation open,
+    // so the journal entry only updates at real milestones rather than re-writing itself with
+    // identical text each check-in.
+    private void ReportQuestProgress()
+    {
+        if (QuestManager.Instance == null) return;
+
+        string description;
+        var status = QuestManager.Status.InProgress;
+
+        switch (questState)
+        {
+            case QuestState.Accepted:
+                description = "Bring the seashell " + npcName + " lost along the shore back to them.";
+                break;
+            case QuestState.Completed:
+                description = "Returned the lost seashell to " + npcName + ". Quest complete.";
+                status = QuestManager.Status.Completed;
+                break;
+            default:
+                return;
+        }
+
+        QuestManager.Instance.AddOrUpdateQuest(questId, questTitle, description, status);
+    }
+
+    // Placeholder quest, step 3: repeatable flavor line once turned in.
+    private void OpenQuestCompletedFlavor()
+    {
+        string[] lines = { "Thanks again for finding that seashell.", "Safe travels out there." };
+        DialogueUI.Instance.Open(npcName, lines, OnDialogueClosed);
     }
 
     // CharacterController.Move() is relative, so a direct position snap needs the controller
